@@ -6,6 +6,7 @@ using backend.Models;
 using Microsoft.AspNetCore.SignalR;
 using backend.Hubs;
 using System.Text;
+using System.Net.Http.Headers;
 
 namespace backend.Services
 {
@@ -14,11 +15,23 @@ namespace backend.Services
     private static readonly ConcurrentDictionary<string, PriceUpdate> LatestPrices = new();
     private static IHubContext<PriceHub>? _hubContext;
 
-    public static void Start(IHubContext<PriceHub> hubContext)
+    public static async Task Start(IHubContext<PriceHub> hubContext)
     {
       _hubContext = hubContext;
+
+      var tiingoToken = Environment.GetEnvironmentVariable("TIINGO_API_KEY") ?? string.Empty;
+
+      if (!string.IsNullOrWhiteSpace(tiingoToken))
+      {
+        await LoadInitialTiingoPrices(tiingoToken);
+        StartTiingo(tiingoToken);
+      }
+      else
+      {
+        Console.WriteLine("[Tiingo] No API token provided. Skipping Tiingo setup.");
+      }
+
       StartBinance();
-      StartTiingo();
     }
 
     private static void StartBinance()
@@ -49,14 +62,10 @@ namespace backend.Services
               await _hubContext.Clients.Group("BTCUSDT").SendAsync("ReceivePrice", update);
               Console.WriteLine($"[Binance] BTCUSDT = {price}");
             }
-            else
-            {
-              Console.WriteLine("[Binance] Skipped message: no 'p' property.");
-            }
           }
           catch (Exception ex)
           {
-            Console.WriteLine($"[Binance] Error parsing message: {ex.Message}");
+            Console.WriteLine($"[Binance] Error: {ex.Message}");
           }
         });
 
@@ -70,25 +79,42 @@ namespace backend.Services
       }));
     }
 
-    private static void StartTiingo()
+    private static void StartTiingo(string tiingoToken)
     {
-      var tiingoToken = Environment.GetEnvironmentVariable("TIINGO_API_KEY") ?? string.Empty;
-      if (string.IsNullOrWhiteSpace(tiingoToken))
-      {
-        Console.WriteLine("[Tiingo] Token not provided. Skipping Tiingo WebSocket connection.");
-        return;
-      }
-
       var url = new Uri("wss://api.tiingo.com/fx");
       var client = new WebsocketClient(url)
       {
         IsReconnectionEnabled = true
       };
 
+      var subscribeMessage = new
+      {
+        eventName = "subscribe",
+        authorization = tiingoToken,
+        eventData = new
+        {
+          thresholdLevel = "5",
+          tickers = new[] { "eurusd", "usdjpy", "gbpusd" }
+        }
+      };
+
+      client.ReconnectionHappened.Subscribe(info =>
+      {
+        Console.WriteLine($"[Tiingo] Reconnected: {info.Type}");
+        client.Send(JsonSerializer.Serialize(subscribeMessage));
+      });
+
+      client.DisconnectionHappened.Subscribe(info =>
+      {
+        Console.WriteLine($"[Tiingo] Disconnected: {info.Type} - {info.Exception?.Message}");
+      });
+
       client.MessageReceived
         .Where(msg => msg.Text != null)
         .Subscribe(async msg =>
         {
+          Console.WriteLine($"[Tiingo] Raw message: {msg.Text}");
+
           try
           {
             if (_hubContext == null) return;
@@ -96,26 +122,43 @@ namespace backend.Services
             var json = JsonDocument.Parse(msg.Text!);
             var root = json.RootElement;
 
-            if (root.TryGetProperty("messageType", out var typeElem) &&
-                typeElem.GetString() == "A" &&
-                root.TryGetProperty("data", out var dataElem) &&
-                dataElem.ValueKind == JsonValueKind.Array &&
-                dataElem.GetArrayLength() >= 8)
+            if (root.TryGetProperty("messageType", out var typeElement) &&
+                typeElement.GetString() == "A" &&
+                root.TryGetProperty("data", out var dataElement) &&
+                dataElement.ValueKind == JsonValueKind.Array &&
+                dataElement.GetArrayLength() >= 8 &&
+                dataElement[0].GetString() == "Q")
             {
-              var symbol = dataElem[1].GetString()!.ToUpper();
-              var price = dataElem[5].GetDecimal(); // midPrice from array index 5
-              var timestamp = DateTime.Parse(dataElem[2].GetString()!);
+              var symbol = dataElement[1].GetString()?.ToUpper();
+              var midPrice = dataElement[5].GetDecimal();
+              var timestamp = DateTime.UtcNow;
 
-              var update = new PriceUpdate
+              if (DateTime.TryParse(dataElement[2].GetString(), out var parsedTime))
               {
-                Symbol = symbol,
-                Price = price,
-                Timestamp = timestamp
-              };
+                timestamp = parsedTime.ToUniversalTime();
+              }
 
-              LatestPrices[symbol] = update;
-              await _hubContext.Clients.Group(symbol).SendAsync("ReceivePrice", update);
-              Console.WriteLine($"[Tiingo] {symbol} = {price}");
+              if (!string.IsNullOrEmpty(symbol))
+              {
+                var update = new PriceUpdate
+                {
+                  Symbol = symbol,
+                  Price = midPrice,
+                  Timestamp = timestamp
+                };
+
+                LatestPrices[symbol] = update;
+                await _hubContext.Clients.Group(symbol).SendAsync("ReceivePrice", update);
+                Console.WriteLine($"[Tiingo] {symbol} = {midPrice} @ {timestamp:O}");
+              }
+            }
+            else if (typeElement.GetString() == "H")
+            {
+              Console.WriteLine("[Tiingo] Heartbeat received.");
+            }
+            else
+            {
+              Console.WriteLine($"[Tiingo] Ignored message: {msg.Text}");
             }
           }
           catch (Exception ex)
@@ -125,19 +168,44 @@ namespace backend.Services
         });
 
       client.Start().Wait();
-
-      var subscribeMessage = new
-      {
-        eventName = "subscribe",
-        authorization = tiingoToken,
-        eventData = new
-        {
-          thresholdLevel = 5,
-          tickers = new[] { "eurusd", "usdjpy" }
-        }
-      };
-
       client.Send(JsonSerializer.Serialize(subscribeMessage));
+    }
+
+    public static async Task LoadInitialTiingoPrices(string token)
+    {
+      try
+      {
+        var client = new HttpClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Token", token);
+
+        var url = "https://api.tiingo.com/tiingo/fx/top?tickers=eurusd,usdjpy,gbpusd";
+        var response = await client.GetStringAsync(url);
+        var json = JsonDocument.Parse(response);
+
+        foreach (var item in json.RootElement.EnumerateArray())
+        {
+          var symbol = item.GetProperty("ticker").GetString()?.ToUpper();
+          var midPrice = item.GetProperty("midPrice").GetDecimal();
+          var timestamp = item.GetProperty("quoteTimestamp").GetDateTime();
+
+          if (!string.IsNullOrEmpty(symbol))
+          {
+            var update = new PriceUpdate
+            {
+              Symbol = symbol,
+              Price = midPrice,
+              Timestamp = timestamp.ToUniversalTime()
+            };
+
+            LatestPrices[symbol] = update;
+            Console.WriteLine($"[Tiingo REST] Loaded {symbol} = {midPrice} @ {timestamp:O}");
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        Console.WriteLine($"[Tiingo REST] Error: {ex.Message}");
+      }
     }
 
     public static PriceUpdate? GetLatestPrice(string symbol)

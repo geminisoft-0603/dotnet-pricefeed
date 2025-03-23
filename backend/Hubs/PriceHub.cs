@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using System.Threading.Tasks;
 
-namespace models.Hubs
+namespace backend.Hubs
 {
   public class PriceHub : Hub
   {

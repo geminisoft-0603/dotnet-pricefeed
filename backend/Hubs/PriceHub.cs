@@ -1,16 +1,20 @@
 using Microsoft.AspNetCore.SignalR;
-using backend.Models;
+using System.Threading.Tasks;
 
-public class PriceHub : Hub
+namespace models.Hubs
 {
-  public async Task Subscribe(string symbol)
+  public class PriceHub : Hub
   {
-    await Groups.AddToGroupAsync(Context.ConnectionId, symbol.ToUpper());
-    Console.WriteLine($"Client {Context.ConnectionId} subscribed to {symbol}");
-  }
+    public async Task Subscribe(string symbol)
+    {
+      await Groups.AddToGroupAsync(Context.ConnectionId, symbol.ToUpper());
+      Console.WriteLine($"Client {Context.ConnectionId} subscribed to {symbol}");
+    }
 
-  public static async Task BroadcastPrice(IHubContext<PriceHub> hub, PriceUpdate price)
-  {
-    await hub.Clients.Group(price.Symbol.ToUpper()).SendAsync("ReceivePrice", price);
+    public async Task Unsubscribe(string symbol)
+    {
+      await Groups.RemoveFromGroupAsync(Context.ConnectionId, symbol.ToUpper());
+      Console.WriteLine($"Client {Context.ConnectionId} unsubscribed from {symbol}");
+    }
   }
 }

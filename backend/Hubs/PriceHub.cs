@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.SingalR;
-using PriceFeedService.Models;
+using backend.Models;
 
 public class PriceHub : Hub
 {

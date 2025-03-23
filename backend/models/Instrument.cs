@@ -1,4 +1,4 @@
-namespace PriceFeedService.Models
+namespace backend.Models
 {
   public class Instrument
   {

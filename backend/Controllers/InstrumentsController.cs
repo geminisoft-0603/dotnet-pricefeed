@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using PriceFeedService.Models;
+using backend.Models;
 
 [ApiController]
 [Route("api/[controller]")]

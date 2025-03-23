@@ -1,5 +1,5 @@
-using PriceFeedService.Hubs;
-using PriceFeedService.Services;
+using backend.Hubs;
+using backend.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();

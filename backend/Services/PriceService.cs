@@ -2,12 +2,12 @@ using System.Collections.Concurrent;
 using Websocket.Client;
 using System.Reactive.Linq;
 using System.Text.Json;
-using PriceFeedService.Models;
+using backend.Models;
 using Microsoft.AspNetCore.SignalR;
-using PriceFeedService.Hubs;
+using backend.Hubs;
 using System.Text;
 
-namespace PriceFeedService.Services
+namespace backend.Services
 {
   public static class PriceService
   {

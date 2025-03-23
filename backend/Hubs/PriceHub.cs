@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.SingalR;
+using Microsoft.AspNetCore.SignalR;
 using backend.Models;
 
 public class PriceHub : Hub

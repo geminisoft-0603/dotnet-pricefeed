@@ -26,7 +26,7 @@ platforms that need access to up-to-date financial pricing data.
 
 ---
 
-## 🔌 REST API Endpoints
+## REST API Endpoints
 
 | Method | Endpoint                              | Description                                 |
 |--------|----------------------------------------|---------------------------------------------|

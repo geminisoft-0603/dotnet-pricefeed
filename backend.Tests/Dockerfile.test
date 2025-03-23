@@ -1,0 +1,15 @@
+FROM mcr.microsoft.com/dotnet/sdk:7.0 AS test
+
+WORKDIR /src
+
+COPY ./backend/backend.csproj ./backend/
+COPY ./backend.Tests/backend.Tests.csproj ./backend.Tests/
+
+RUN dotnet restore ./backend.Tests/backend.Tests.csproj
+
+COPY ./backend ./backend/
+COPY ./backend.Tests ./backend.Tests/
+
+WORKDIR /src/backend.Tests
+RUN dotnet test --no-build --verbosity normal
+

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>💱 Live Forex & Crypto Prices</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.5/signalr.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 2rem;
+      background: #f7f7f7;
+    }
+    h2 {
+      color: #444;
+    }
+    .price {
+      font-size: 1.2rem;
+      margin: 0.5rem 0;
+      transition: color 0.4s ease;
+    }
+  </style>
+</head>
+<body>
+  <h2>💱 Live Forex & Crypto Prices</h2>
+  <div class="price same" id="EURUSD">EURUSD: Loading...</div>
+  <div class="price same" id="USDJPY">USDJPY: Loading...</div>
+  <div class="price same" id="BTCUSDT">BTCUSDT: Loading...</div>
+</body>
+
+<script>
+  const connection = new signalR.HubConnectionBuilder()
+    .withUrl("http://localhost:5000/ws/prices")
+    .configureLogging(signalR.LogLevel.Information)
+    .build();
+
+  const symbols = ["EURUSD", "USDJPY", "BTCUSDT"];
+  const lastPrices = {};
+  
+  symbols.forEach(symbol => {
+    fetch(`http://localhost:5000/api/instruments/${symbol}`)
+      .then(res => res.ok ? res.json() : Promise.reject("Price not available"))
+      .then(data => {
+        const div = document.getElementById(symbol);
+        const time = new Date(data.timestamp).toLocaleTimeString();
+        div.innerText = `${symbol}: ${data.price} @ ${time}`;
+        lastPrices[symbol] = data.price;
+      })
+      .catch(() => {
+        document.getElementById(symbol).innerText = `${symbol}: Waiting for update...`;
+      });
+  });
+
+  connection.on("ReceivePrice", (data) => {
+    const { symbol, price, timestamp } = data;
+    const div = document.getElementById(symbol.toUpperCase());
+    if (div) {
+      const time = new Date(timestamp).toLocaleTimeString();
+      const prev = lastPrices[symbol] ?? price;
+
+      let trendClass = "same";
+      if (price > prev) trendClass = "up";
+      else if (price < prev) trendClass = "down";
+
+      div.innerText = `${symbol}: ${price} @ ${time}`;
+      div.className = `price ${trendClass}`;
+      lastPrices[symbol] = price;
+    }
+  });
+
+  connection.start()
+    .then(() => {
+      console.log(" === Connected to SignalR hub === ");
+      symbols.forEach(symbol => {
+        connection.invoke("Subscribe", symbol);
+      });
+    })
+    .catch(err => console.error(" *** Connection failed:", err));
+</script>
+</html>
